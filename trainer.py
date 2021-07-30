@@ -347,7 +347,7 @@ class LSTMDebugger(DebuggerBase):
             batch_stop_loss = batch_stop_loss
             batch_word_loss = batch_word_loss
             loss_semantic = loss_tf_report + loss_tf_mesh
-            batch_loss = (batch_word_loss + loss_semantic * 2 + batch_stop_loss) / 2  
+            batch_loss = (batch_word_loss + loss_semantic + batch_stop_loss) / 2  
             sto.append(batch_stop_loss.item())
             wor.append(batch_word_loss.item())
             tfr.append(loss_semantic.item())
