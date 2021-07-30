@@ -134,7 +134,7 @@ class CaptionSampler(object):
             true = gt_tags.cpu().numpy()
             true = np.array(true > 0.0, dtype=float)
             pred = mesh_tf.detach().cpu().numpy()
-            pred = np.array(pred > 0.8, dtype=float)
+            pred = np.array(pred > 0.5, dtype=float)
             res = precision_score(y_true=true, y_pred=pred, average='micro')
             acc.append(res)
 
