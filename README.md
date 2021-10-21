@@ -1,4 +1,4 @@
-The Pytorch implementaion of the paper: Joint Embedding of Deep Visual and Semantic Features for Medical Image Report Generation.
+The Pytorch implementaion of the paper: Joint Embedding of Deep Visual and Semantic Features for Medical Image Report Generation, IEEE Transactions on Multimeida.
 
 Authors: Yan Yang, Jun Yu*, Jian Zhang, Weidong Han*, Hanliang Jiang, and Qingming Huang
 
