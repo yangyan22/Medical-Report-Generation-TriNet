@@ -68,7 +68,7 @@ class CaptionSampler(object):
         return model
 
     def _init_semantic_embedding(self):
-        model = SemanticEmbedding(tag_dim=self.args.tag_dim, report_dim=self.args.report_dim, embed_size=self.args.embed_size)
+        model = SemanticEmbedding(mesh_dim=self.args.mesh_dim, report_dim=self.args.report_dim, embed_size=self.args.embed_size)
         if self.model_state_dict is not None:
             model.load_state_dict(self.model_state_dict['semantic'])
             print("Semantic Embedding Loaded!")
@@ -122,7 +122,11 @@ class CaptionSampler(object):
         progress_bar = tqdm(self.test_data_loader, desc='Generating')
         results = {}
         acc = []
-        tag_vocab = ['normal', 'degenerative change', 'opacity', 'granuloma', 'atelectasis', 'cardiomegaly', 'scar', 'pleural effusion', 'aorta', 'fracture', 'sternotomy', 'emphysema', 'pneumonia', 'infiltrates', 'osteophytes', 'copd', 'nodule', 'edema', 'deformity', 'diaphragm', 'thoracic vertebrae', 'cabg', 'arthritic changes', 'hiatal hernia', 'support devices', 'hyperinflation', 'tortuous aorta', 'congestion', 'hyperexpansion', 'scoliosis', 'others']
+        mesh_vocab = ['normal', 'degenerative change', 'granuloma', 'opacity', 'atelectasis', 'cardiomegaly', 'scar',
+                      'pleural effusion', 'aorta', 'fracture', 'emphysema', 'pneumonia', 'sternotomy', 'diaphragm',
+                      'nodule', 'infiltrates', 'deformity', 'osteophytes', 'copd', 'edema', 'support devices',
+                      'eventration', 'thoracic vertebrae', 'tortuous aorta', 'cabg', 'scoliosis', 'hyperinflation',
+                      'calcinosis', 'hiatal hernia', 'effusion']
 
         for images1, images2, targets, prob, mesh, report, study_id in progress_bar:
             images_frontal = self._to_var(images1)
@@ -134,7 +138,7 @@ class CaptionSampler(object):
             true = gt_tags.cpu().numpy()
             true = np.array(true > 0.0, dtype=float)
             pred = mesh_tf.detach().cpu().numpy()
-            pred = np.array(pred > 0.5, dtype=float)
+            pred = np.array(pred > 0.8, dtype=float)
             res = precision_score(y_true=true, y_pred=pred, average='micro')
             acc.append(res)
 
@@ -182,14 +186,14 @@ class CaptionSampler(object):
                 results[id] = {'Pred Sent': pred_sentences[id], 'Real Sent': real_sentences[id]}
 
             pred_tags = []
-            for i in range(31):
+            for i in range(self.args.mesh_dim):
                 if pred_tag[id][i] == 1:
-                    pred_tags.append(tag_vocab[i])
+                    pred_tags.append(mesh_vocab[i])
 
             real_tags = []
-            for i in range(31):
+            for i in range(self.args.mesh_dim):
                 if real_tag[id][i] == 1:
-                    real_tags.append(tag_vocab[i])
+                    real_tags.append(mesh_vocab[i])
 
             print("\n")
             print(id)
@@ -230,19 +234,21 @@ if __name__ == '__main__':
     import warnings
     warnings.filterwarnings("ignore")
     parser = argparse.ArgumentParser()
-    DATA_Path = "/media/camlab1/doc_drive/IU_data/YY/YY_Data"
-    parser.add_argument('--vocab_path', type=str, default=DATA_Path+"/vocab.pkl", help='path of vocabulary')
-    parser.add_argument('--data_dir', type=str, default=DATA_Path+"/data.json", help='path of data')
+    DATA_Path = '/media/camlab1/doc_drive/IU_data/images_R2_Ori'
+
+    parser.add_argument('--vocab_path', type=str, default=DATA_Path + '/vocab.pkl', help='path for vocabulary')
+    parser.add_argument('--data_dir', type=str, default=DATA_Path + '/iu_annotation_R2Gen.json', help='path for images')
+
     parser.add_argument('--mesh_tf_idf', type=str, default=DATA_Path + "/TF_IDF_Mesh.json", help='path of mesh_tf_idf')
     parser.add_argument('--report_tf_idf', type=str, default=DATA_Path + "/TF_IDF_Report.json", help='path of report_tf_idf')
 
-    parser.add_argument('--model_dir', type=str, default='./models/2021-06-15 21:57/', help='path of model')
-    parser.add_argument('--load_model_path', type=str, default='val_best_loss.pth.tar', help='path of trained model')
+    parser.add_argument('--model_dir', type=str, default='./models/2021-11-09 14:51/', help='path of model')
+    parser.add_argument('--load_model_path', type=str, default='val_best.pth.tar', help='path of trained model')
     parser.add_argument('--resize', type=int, default=224, help='size for resizing images')
     parser.add_argument('--result_path', type=str, default='results', help='the path for storing results')
     parser.add_argument('--result_name', type=str, default='results', help='the name of json results')
 
-    parser.add_argument('--tag_dim', type=int, default=30)
+    parser.add_argument('--mesh_dim', type=int, default=30)
     parser.add_argument('--report_dim', type=int, default=800)
     parser.add_argument('--embed_size', type=int, default=512)
     parser.add_argument('--hidden_size', type=int, default=512)
