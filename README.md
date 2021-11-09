@@ -23,6 +23,11 @@ If you find our work or our code helpful for your research, please cite our pape
   - matplotlib
   - PIL 
   - itertools
+  - copy
+  - re
+  - abc
+  - pandas
+  - torch
 
 The ground-truth TF-IDF features of MeSH and MeRP in the training set are constructed before training with codes in TF-IDF folder.
 
