@@ -4,7 +4,7 @@ Authors: Yan Yang, Jun Yu*, Jian Zhang, Weidong Han*, Hanliang Jiang, and Qingmi
 
 If you find our work or our code helpful for your research, please cite our paper.
 
-## Dependencies
+# Dependencies
   - Python=3.7.3
   - pytorch=1.8.1
   - pickle
@@ -39,6 +39,6 @@ https://github.com/tylin/coco-caption
 
 https://github.com/MorvanZhou/NLP-Tutorials
 
-# about the metric meteor
+# the metric meteor
 the paraphrase-en.gz should be put into the .\pycocoevalcap\meteor\data, since the file is too big to upload.
 
