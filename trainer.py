@@ -14,6 +14,8 @@ import torch.nn as nn
 import matplotlib.pyplot as plt
 from sklearn.metrics import precision_score
 from utils.metrics import compute_scores
+import pandas as pd
+
 
 class DebuggerBase:
     def __init__(self, args):
@@ -30,8 +32,10 @@ class DebuggerBase:
             self.vocab = pickle.load(f)
         self.train_transform = self._init_train_transform()
         self.val_transform = self._init_val_transform()
+        self.test_transform = self._init_test_transform()
         self.train_data_loader = self._init_data_loader(split='train', transform=self.train_transform, shuffle=True)
         self.val_data_loader = self._init_data_loader(split='val', transform=self.val_transform, shuffle=False)
+        self.test_data_loader = self._init_data_loader(split='test', transform=self.test_transform, shuffle=False)
         self.ce_criterion = self._init_ce_criterion()
         self.l1_criterion = self._init_l1_criterion()
         self.mse_criterion = self._init_mse_criterion()
@@ -44,6 +48,25 @@ class DebuggerBase:
         self.word_model = self._init_word_model()
         self.optimizer = torch.optim.Adam(params=self.params, lr=self.args.learning_rate, weight_decay=0, amsgrad=False)
         self.scheduler = ReduceLROnPlateau(self.optimizer, 'min', patience=self.args.patience, factor=0.1)
+        self.epochs_recorder = {}
+
+    def _print_epochs_to_file(self):
+        self.epochs_recorder['time'] = time.asctime(time.localtime(time.time()))
+        record_path = os.path.join(self.model_dir, 'print_epochs.csv')
+        print("record_path : {}".format(record_path))
+        if not os.path.exists(record_path):
+            record_table = pd.DataFrame()
+        else:
+            record_table = pd.read_csv(record_path)
+        self.epochs_recorder["test_BO_M"] = self.epochs_recorder["test_METEOR"]
+        self.epochs_recorder["test_BP_R"] = self.epochs_recorder["test_ROUGE_L"]
+        self.epochs_recorder["test_BQ_C"] = self.epochs_recorder["test_CIDEr"]
+
+        self.epochs_recorder["val_BO_M"] = self.epochs_recorder["val_METEOR"]
+        self.epochs_recorder["val_BP_R"] = self.epochs_recorder["val_ROUGE_L"]
+        self.epochs_recorder["val_BQ_C"] = self.epochs_recorder["val_CIDEr"]
+        record_table = record_table.append(self.epochs_recorder, ignore_index=True)
+        record_table.to_csv(record_path, index=False)
 
     def _init_model_dir(self):
         model_dir = self.args.model_path
@@ -65,6 +88,14 @@ class DebuggerBase:
         return transform
 
     def _init_val_transform(self):
+        transform = transforms.Compose([
+            transforms.Resize((self.args.size, self.args.size)),
+            transforms.ToTensor(),
+            transforms.Normalize((0.485, 0.456, 0.406),
+                                 (0.229, 0.224, 0.225))])
+        return transform
+
+    def _init_test_transform(self):
         transform = transforms.Compose([
             transforms.Resize((self.args.size, self.args.size)),
             transforms.ToTensor(),
@@ -121,7 +152,7 @@ class DebuggerBase:
     def _get_now(self):
         return str(time.strftime('%Y-%m-%d %H:%M', time.localtime()))
 
-    def _save_model(self, epoch_id, train_loss, b1, b2, b3, b4, ROUGE_L, CIDEr):
+    def _save_model(self, epoch_id, train_loss, b1, b2, b3, b4, ROUGE_L, CIDEr, METEOR):
         def save_whole_model(_filename):
             print("Saved Model in {}".format(_filename))
             torch.save({'extractor': self.extractor.state_dict(),
@@ -144,12 +175,13 @@ class DebuggerBase:
             self.max_bleu2 = b2
             self.max_bleu3 = b3
             self.max_bleu4 = b4
+            self.max_METEOR = METEOR
             self.max_ROUGE_L = ROUGE_L
             self.max_CIDEr = CIDEr
 
-        # if epoch_id % 20 == 0 and epoch_id != 0:
-        #     file_name = "save{}.pth.tar".format(epoch_id)
-        #     save_whole_model(file_name)
+        if epoch_id % self.args.save_period == 0 and epoch_id != 0:
+            file_name = "save{}.pth.tar".format(epoch_id)
+            save_whole_model(file_name)
 
     def _init_visual_extractor(self):
         model = VisualFeatureExtractor(self.args.embed_size)
@@ -173,7 +205,7 @@ class DebuggerBase:
         return model
 
     def _init_semantic_embedding(self):
-        model = SemanticEmbedding(tag_dim=self.args.tag_dim,
+        model = SemanticEmbedding(mesh_dim=self.args.mesh_dim,
                                   report_dim=self.args.report_dim,
                                   embed_size=self.args.embed_size)
         try:
@@ -200,7 +232,7 @@ class DebuggerBase:
         try:
             model_state = torch.load(self.args.load_sentence_model_path)
             model.load_state_dict(model_state['sentence_model'])
-            print("[Load Sentence Model Succeed!\n")
+            print("[Load Sentence Model Succeed!]\n")
         except Exception as err:
             print("[Load Sentence model Failed {}!]\n".format(err))
         if not self.args.sentence_trained:
@@ -224,7 +256,7 @@ class DebuggerBase:
         try:
             model_state = torch.load(self.args.load_word_model_path)
             model.load_state_dict(model_state['word_model'])
-            print("[Load Word Model Succeed!\n")
+            print("[Load Word Model Succeed!]\n")
         except Exception as err:
             print("[Load Word model Failed {}!]\n".format(err))
 
@@ -250,16 +282,17 @@ class DebuggerBase:
 
         for epoch_id in range(self.start_epoch, self.args.epochs):
             print('Epoch:{}'.format(epoch_id))
-
+            log = {'epoch': epoch_id}
             stop_loss, word_loss, semantic_loss, train_loss = self._epoch_train()
-            test_met, val_acc = self._epoch_val()
-
+            val_met, val_acc = self._epoch_val()
+            test_met, test_acc = self._epoch_test()
             b1 = test_met['BLEU_1']
             b2 = test_met['BLEU_2']
             b3 = test_met['BLEU_3']
             b4 = test_met['BLEU_4']
             CIDEr = test_met['CIDEr']
             ROUGE_L = test_met['ROUGE_L']
+            METEOR = test_met['METEOR']
 
             loss_stop.append(stop_loss)
             loss_word.append(word_loss)
@@ -281,15 +314,23 @@ class DebuggerBase:
             plt.savefig(self.model_dir + "/BLEU.png")
             plt.close('all')
 
-            self._save_model(epoch_id, train_loss, b1, b2, b3, b4, ROUGE_L, CIDEr)
+            self._save_model(epoch_id, train_loss, b1, b2, b3, b4, ROUGE_L, CIDEr, METEOR)
             print('BLEU1:{}'.format(self.max_bleu1))
             print('BLEU2:{}'.format(self.max_bleu2))
             print('BLEU3:{}'.format(self.max_bleu3))
             print('BLEU4:{}'.format(self.max_bleu4))
+            print('METEOR:{}'.format(self.max_METEOR))
             print('ROUGE_L:{}'.format(self.max_ROUGE_L))
             print('CIDEr:{}'.format(self.max_CIDEr))
             print("\n")
             self.scheduler.step(train_loss)
+            log.update(**{'test_' + k: v for k, v in test_met.items()})
+            log.update(**{'val_' + k: v for k, v in val_met.items()})
+            log.update(**{'test_' + k: v for k, v in test_met.items()})
+            # log.update(**test_acc)
+            # log.update(**val_acc)
+            self.epochs_recorder.update(log)
+            self._print_epochs_to_file()
 
 
 class LSTMDebugger(DebuggerBase):
@@ -315,8 +356,7 @@ class LSTMDebugger(DebuggerBase):
         self.word_model.train()
         sto = []
         wor = []
-        tfr = []
-        tfm = []
+        sem = []
         epoc = []
         start_time = time.time()
         progress_bar = tqdm(self.train_data_loader, desc='Training')
@@ -342,15 +382,15 @@ class LSTMDebugger(DebuggerBase):
                     word_mask = (captions[:, sentence_index, word_index + 1] > 0).float()
                     batch_word_loss += (self.ce_criterion(word, captions[:, sentence_index, word_index + 1]) * word_mask).mean()
 
-            loss_tf_mesh = self.mse_criterion(nn.functional.normalize(gt_tf_mesh), nn.functional.normalize(mesh_tf))  
+            loss_tf_mesh = self.mse_criterion(nn.functional.normalize(gt_tf_mesh), nn.functional.normalize(mesh_tf))
             loss_tf_report = self.mse_criterion(nn.functional.normalize(gt_tf_report), nn.functional.normalize(report_tf))
-            batch_stop_loss = batch_stop_loss
+            batch_stop_loss = batch_stop_loss * 0.5
             batch_word_loss = batch_word_loss
-            loss_semantic = loss_tf_report + loss_tf_mesh
-            batch_loss = (batch_word_loss + loss_semantic + batch_stop_loss) / 2  
+            loss_semantic = (loss_tf_report + loss_tf_mesh)
+            batch_loss = (batch_word_loss + loss_semantic + batch_stop_loss) / 2
             sto.append(batch_stop_loss.item())
             wor.append(batch_word_loss.item())
-            tfr.append(loss_semantic.item())
+            sem.append(loss_semantic.item())
             epoc.append(batch_loss.item())
 
             self.optimizer.zero_grad()
@@ -363,7 +403,7 @@ class LSTMDebugger(DebuggerBase):
         end_time = time.time()
         aa = np.mean(sto)
         bb = np.mean(wor)
-        cc = np.mean(tfr)
+        cc = np.mean(sem)
         ee = np.mean(epoc)
         print("time:%d" % (end_time - start_time))
         print('train_stop_loss:{}'.format(aa))
@@ -381,8 +421,7 @@ class LSTMDebugger(DebuggerBase):
         progress_bar = tqdm(self.val_data_loader, desc='Generating')
         results = {}
         acc = []
-        tag_vocab = ['normal', 'degenerative change', 'opacity', 'granuloma', 'atelectasis', 'cardiomegaly', 'scar', 'pleural effusion', 'aorta', 'fracture', 'sternotomy', 'emphysema', 'pneumonia', 'infiltrates', 'osteophytes', 'copd', 'nodule', 'edema', 'deformity', 'diaphragm', 'thoracic vertebrae', 'cabg', 'arthritic changes', 'hiatal hernia', 'support devices', 'hyperinflation', 'tortuous aorta', 'congestion', 'hyperexpansion', 'scoliosis', 'others']
-
+        mesh_vocab = ['normal', 'degenerative change', 'granuloma', 'opacity', 'atelectasis', 'cardiomegaly', 'scar', 'pleural effusion', 'aorta', 'fracture', 'emphysema', 'pneumonia', 'sternotomy', 'diaphragm', 'nodule', 'infiltrates', 'deformity', 'osteophytes', 'copd', 'edema', 'support devices', 'eventration', 'thoracic vertebrae', 'tortuous aorta', 'cabg', 'scoliosis', 'hyperinflation', 'calcinosis', 'hiatal hernia', 'effusion']
         for images1, images2, targets, prob, mesh, report, study in progress_bar:
             images_frontal = self._to_var(images1, requires_grad=False)
             images_lateral = self._to_var(images2, requires_grad=False)
@@ -435,14 +474,14 @@ class LSTMDebugger(DebuggerBase):
                 results[id] = {'Pred Sent': pred_sentences[id], 'Real Sent': real_sentences[id]}
 
             pred_tags = []
-            for i in range(31):
+            for i in range(self.args.mesh_dim):
                 if pred_tag[id][i] == 1:
-                    pred_tags.append(tag_vocab[i])
+                    pred_tags.append(mesh_vocab[i])
 
             real_tags = []
-            for i in range(31):
+            for i in range(self.args.mesh_dim):
                 if real_tag[id][i] == 1:
-                    real_tags.append(tag_vocab[i])
+                    real_tags.append(mesh_vocab[i])
             # print("\n")
             # print('Pred Tags.{}'.format(pred_tags))
             # print('Real Tags.{}'.format(real_tags))
@@ -477,22 +516,127 @@ class LSTMDebugger(DebuggerBase):
         print("time:%d" % (end_time - start_time))
         return val_met, accuracy
 
+    def _epoch_test(self):
+        self.extractor.eval()
+        self.sentence_model.eval()
+        self.word_model.eval()
+        self.semantic.eval()
+        start_time = time.time()
+        progress_bar = tqdm(self.test_data_loader, desc='Generating')
+        results = {}
+        acc = []
+        mesh_vocab = ['normal', 'degenerative change', 'granuloma', 'opacity', 'atelectasis', 'cardiomegaly', 'scar', 'pleural effusion', 'aorta', 'fracture', 'emphysema', 'pneumonia', 'sternotomy', 'diaphragm', 'nodule', 'infiltrates', 'deformity', 'osteophytes', 'copd', 'edema', 'support devices', 'eventration', 'thoracic vertebrae', 'tortuous aorta', 'cabg', 'scoliosis', 'hyperinflation', 'calcinosis', 'hiatal hernia', 'effusion']
+        for images1, images2, targets, prob, mesh, report, study in progress_bar:
+            images_frontal = self._to_var(images1, requires_grad=False)
+            images_lateral = self._to_var(images2, requires_grad=False)
+            frontal, lateral, avg = self.extractor.forward(images_frontal, images_lateral)  # [8, 49, 512] [8, 512]
+            mesh_tf, report_tf, state_c, state_h = self.semantic.forward(avg)  # [BS, 30]
+            gt_mesh = self._to_var(torch.Tensor(mesh), requires_grad=False).cpu().numpy()
+            true = np.array(gt_mesh > 0.0, dtype=float)
+            pred = np.array(mesh_tf.detach().cpu().numpy() > 0.5, dtype=float)
+            res = precision_score(y_true=true, y_pred=pred, average='micro')
+            acc.append(res)
+            pred_sentences = {}
+            real_sentences = {}
+            pred_tag = {}
+            real_tag = {}
+            for i in study:
+                pred_sentences[i] = {}
+                real_sentences[i] = {}
+                pred_tag[i] = {}
+                real_tag[i] = {}
+            state = (torch.unsqueeze(state_c, 0), torch.unsqueeze(state_h, 0))
+            phid = torch.unsqueeze(state_h, 1)
+            for sentence_index in range(self.args.s_max):
+                p_stop, state, h0_word, c0_word, phid = self.sentence_model.forward(frontal, lateral, state, phid)
+                p_stop = p_stop.squeeze(1)
+                p_stop = torch.unsqueeze(torch.max(p_stop, 1)[1], 1)
+                states_word = (c0_word, h0_word)
+                start_tokens = np.zeros(images_frontal.shape[0])
+                start_tokens[:] = self.vocab('<start>')
+                start_tokens = self._to_var(torch.Tensor(start_tokens).long(), requires_grad=False)
+                sampled_ids, _ = self.word_model.sample(start_tokens, states_word)
+                sampled_ids = sampled_ids * p_stop.cpu().numpy()
+                for id, array in zip(study, sampled_ids):
+                    pred_sentences[id][sentence_index] = self.__vec2sent(array)
+
+            for id, array in zip(study, targets):
+                for i, sent in enumerate(array):
+                    real_sentences[id][i] = self.__vec2sent(sent)
+
+            for id, array in zip(study, pred):
+                pred_tag[id] = array
+
+            for id, array in zip(study, mesh):
+                real_tag[id] = array
+
+            for id in study:
+                print(id)
+                print('Pred Sent.{}'.format(pred_sentences[id]))
+                print('Real Sent.{}'.format(real_sentences[id]))
+                print('\n')
+                results[id] = {'Pred Sent': pred_sentences[id], 'Real Sent': real_sentences[id]}
+
+            pred_tags = []
+            for i in range(self.args.mesh_dim):
+                if pred_tag[id][i] == 1:
+                    pred_tags.append(mesh_vocab[i])
+
+            real_tags = []
+            for i in range(self.args.mesh_dim):
+                if real_tag[id][i] == 1:
+                    real_tags.append(mesh_vocab[i])
+            # print("\n")
+            # print('Pred Tags.{}'.format(pred_tags))
+            # print('Real Tags.{}'.format(real_tags))
+            # print('Pred Sent.{}'.format(pred_sentences[id]))
+            # print('Real Sent.{}'.format(real_sentences[id]))
+            # result_path = os.path.join(self.args.model_dir, self.args.result_path)
+            # if not os.path.exists(result_path):
+            #     os.makedirs(result_path)
+            # with open(os.path.join(result_path, '{}.json'.format(self.args.result_name)), 'w') as f:
+            #     json.dump(results, f)
+        end_time = time.time()
+        gts = []
+        res = []
+        for key in results:
+            gt = ""
+            re = ""
+            for i in results[key]["Real Sent"]:
+                if results[key]["Real Sent"][i] != "":
+                    gt = gt + results[key]["Real Sent"][i] + " . "
+
+            for i in results[key]["Pred Sent"]:
+                if results[key]["Pred Sent"][i] != "":
+                    re = re + results[key]["Pred Sent"][i] + " . "
+            gts.append(gt)
+            res.append(re)
+
+        test_met = compute_scores({i: [gt] for i, gt in enumerate(gts)},
+                                 {i: [re] for i, re in enumerate(res)})
+        print(test_met)
+        accuracy = np.mean(acc)
+        print('TEST_Acc:{}'.format(accuracy))
+        print("Time:%d" % (end_time - start_time))
+        return test_met, accuracy
+
 
 if __name__ == '__main__':
     warnings.filterwarnings("ignore")
     parser = argparse.ArgumentParser()
     parser.add_argument('--patience', type=int, default=10)  # patience for updating the lr
-    DATA_Path = '/media/camlab1/doc_drive/IU_data/YY/YY_Data'
+    DATA_Path = '/media/camlab1/doc_drive/IU_data/images_R2_Ori'
 
     parser.add_argument('--vocab_path', type=str, default=DATA_Path + '/vocab.pkl', help='path for vocabulary')
-    parser.add_argument('--data_dir', type=str, default=DATA_Path + '/data.json', help='path for images')
+    parser.add_argument('--data_dir', type=str, default=DATA_Path + '/iu_annotation_R2Gen.json', help='path for images')
 
     parser.add_argument('--mesh_tf_idf', type=str, default=DATA_Path + '/TF_IDF_Mesh.json', help='mesh_tf_idf')
     parser.add_argument('--report_tf_idf', type=str, default=DATA_Path + '/TF_IDF_Report.json', help='report_tf_idf')
     parser.add_argument('--model_path', type=str, default='./models', help='path for saving models')
 
-    RESUME_MODEL_PATH = './models/2021-06-16 18:56/train_best.pth.tar'
+    RESUME_MODEL_PATH = './models/train_best.pth.tar'
     parser.add_argument('--load_model_path', type=str, default=RESUME_MODEL_PATH, help='path of resume')
+    parser.add_argument('--save_period', type=int, default=10, help='period of saving the model')
 
     # Transforms
     parser.add_argument('--resize', type=int, default=256, help='size for resizing images')
@@ -503,8 +647,8 @@ if __name__ == '__main__':
     parser.add_argument('--visual_trained', action='store_true', default=True, help='visual extractor or not')
 
     # SemanticFeatureEmbedding
-    parser.add_argument('--tag_dim', type=int, default=30)  # MeSH embedding dim
-    parser.add_argument('--report_dim', type=int, default=800)  # MeRP embedding dim
+    parser.add_argument('--mesh_dim', type=int, default=30)  # MeSH embedding dim: the length of MeSH TF-IDF
+    parser.add_argument('--report_dim', type=int, default=800)  # MeRP embedding dim: the length of report TF-IDF 
     parser.add_argument('--fc_in_features', type=int, default=1024)
     parser.add_argument('--load_semantic_model_path', type=str, default=RESUME_MODEL_PATH)
     parser.add_argument('--semantic_trained', action='store_true', default=True)
@@ -523,7 +667,7 @@ if __name__ == '__main__':
 
     parser.add_argument('--batch_size', type=int, default=16)
     parser.add_argument('--learning_rate', type=int, default=5e-5)
-    parser.add_argument('--epochs', type=int, default=100)
+    parser.add_argument('--epochs', type=int, default=60)
     parser.add_argument('--clip', type=float, default=1, help='gradient clip, -1 means no clip (default: 0.35)')
     parser.add_argument('--result_path', type=str, default='results', help='the path for storing results')
     parser.add_argument('--result_name', type=str, default='results', help='the name of json results')
