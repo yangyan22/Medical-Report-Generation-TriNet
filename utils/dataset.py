@@ -112,8 +112,11 @@ class ChestXrayDataSet(Dataset):
         image_1 = self.image1[index]
         image_2 = self.image2[index]
 
-        DATA_PATH = "/media/camlab1/doc_drive/IU_data/images_R2_Ori/"
-        id = image_1.split("_")[0]
+        DATA_PATH = "/media/camlab1/doc_drive/IU_data/YY_Data_TMM"
+        id = image_1.split("/0.png")[0].split("/")[1]  # data format should match the code
+        
+        image_1 = "".join([DATA_PATH, image_1])
+        image_2 = "".join([DATA_PATH, image_2])
 
         image1 = Image.open(''.join([DATA_PATH, image_1])).convert('RGB')
         image2 = Image.open(''.join([DATA_PATH, image_2])).convert('RGB')
