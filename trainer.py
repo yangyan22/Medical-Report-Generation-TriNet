@@ -401,16 +401,16 @@ class LSTMDebugger(DebuggerBase):
                 torch.nn.utils.clip_grad_norm(self.word_model.parameters(), self.args.clip)
             self.optimizer.step()
         end_time = time.time()
-        aa = np.mean(sto)
-        bb = np.mean(wor)
-        cc = np.mean(sem)
-        ee = np.mean(epoc)
+        stop_loss = np.mean(sto)
+        word_loss = np.mean(wor)
+        semantic_loss = np.mean(sem)
+        train_loss = np.mean(epoc)
         print("time:%d" % (end_time - start_time))
-        print('train_stop_loss:{}'.format(aa))
-        print('train_word_loss:{}'.format(bb))
-        print('batch_report_loss:{}'.format(cc))
-        print('train_epoch_loss:{}'.format(ee))
-        return aa, bb, cc, ee
+        print('train_stop_loss:{}'.format(stop_loss))
+        print('train_word_loss:{}'.format(word_loss))
+        print('batch_report_loss:{}'.format(semantic_loss))
+        print('train_epoch_loss:{}'.format(train_loss))
+        return stop_loss, word_loss, semantic_loss, train_loss
 
     def _epoch_val(self):
         self.extractor.eval()
