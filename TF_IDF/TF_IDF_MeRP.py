@@ -14,7 +14,7 @@ with open('/media/camlab1/doc_drive/IU_data/images_R2_Ori/vocab_TF-IDF.json', 'r
 docs = []
 k = []
 for key in DATA["train"]:
-    b = key['report'].replace('.', '').replace(',', '').split()
+    b = key['report'].lower().replace('.', '').replace(',', '').split()
     k.append(key['id'])
     for i in range(len(b)):
         if b[i] not in vocab:
